@@ -33,8 +33,8 @@ app.set('trust proxy', 1);
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000, 
+  max: 100, 
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -60,18 +60,18 @@ const connectDB = async () => {
       useUnifiedTopology: true,
       serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
-      maxPoolSize: 10, // Maintain up to 10 socket connections
-      minPoolSize: 2,  // Maintain at least 2 socket connections
-      maxIdleTimeMS: 30000, // Close idle connections after 30s
-      compressors: ['zlib'], // Use compression for MongoDB communication
+      maxPoolSize: 10, 
+      minPoolSize: 2,  
+      maxIdleTimeMS: 30000, 
+      compressors: ['zlib'], 
     });
     
     // Enable query result caching
     mongoose.set('bufferCommands', false);
     
-    console.log('✅ MongoDB connected successfully');
+    console.log('MongoDB connected successfully');
   } catch (err) {
-    console.error('❌ MongoDB connection error:', err.message);
+    console.error('MongoDB connection error:', err.message);
     console.log('Server running without database. Some features may not work.');
   }
 };
