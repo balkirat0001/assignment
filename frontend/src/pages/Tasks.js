@@ -1,123 +1,29 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useForm } from 'react-hook-form';
-import axios from 'axios';
+import api, { clearApiCache } from '../utils/api';
 import toast from 'react-hot-toast';
 import { Plus, Search, Filter, Edit2, Trash2, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
 
-const Tasks = () => {
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [editingTask, setEditingTask] = useState(null);
-  const [filters, setFilters] = useState({
-    status: 'all',
-    priority: 'all',
-    search: ''
-  });
-  const [, setPagination] = useState({});
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors }
-  } = useForm();
-
-  // Fetch tasks
-  const fetchTasks = useCallback(async () => {
-    try {
-      setLoading(true);
-      const queryParams = new URLSearchParams();
-      
-      if (filters.status !== 'all') queryParams.append('status', filters.status);
-      if (filters.priority !== 'all') queryParams.append('priority', filters.priority);
-      if (filters.search) queryParams.append('search', filters.search);
-
-      const response = await axios.get(`/api/tasks?${queryParams.toString()}`);
-      setTasks(response.data.tasks);
-      setPagination(response.data.pagination);
-    } catch (error) {
-      console.error('Error fetching tasks:', error);
-      toast.error('Failed to fetch tasks');
-    } finally {
-      setLoading(false);
-    }
-  }, [filters]);
+// Debounce hook for search optimization
+const useDebounce = (value, delay) => {
+  const [debouncedValue, setDebouncedValue] = useState(value);
 
   useEffect(() => {
-    fetchTasks();
-  }, [fetchTasks]);
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
 
-  // Create or update task
-  const onSubmit = async (data) => {
-    try {
-      console.log('📝 Form submitted with data:', data);
-      console.log('🔄 Editing task:', editingTask);
-      
-      if (editingTask) {
-        console.log('📤 Updating task with ID:', editingTask._id);
-        await axios.put(`/api/tasks/${editingTask._id}`, data);
-        toast.success('Task updated successfully');
-      } else {
-        console.log('📤 Creating new task...');
-        const response = await axios.post('/api/tasks', data);
-        console.log('✅ Task created:', response.data);
-        toast.success('Task created successfully');
-      }
-      
-      fetchTasks();
-      setShowCreateModal(false);
-      setEditingTask(null);
-      reset();
-    } catch (error) {
-      console.error('❌ Error saving task:', error);
-      console.error('❌ Error response:', error.response?.data);
-      console.error('❌ Error status:', error.response?.status);
-      toast.error('Failed to save task');
-    }
-  };
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
 
-  // Delete task
-  const deleteTask = async (taskId) => {
-    if (!window.confirm('Are you sure you want to delete this task?')) return;
-    
-    try {
-      await axios.delete(`/api/tasks/${taskId}`);
-      toast.success('Task deleted successfully');
-      fetchTasks();
-    } catch (error) {
-      console.error('Error deleting task:', error);
-      toast.error('Failed to delete task');
-    }
-  };
+  return debouncedValue;
+};
 
-  // Toggle task status
-  const toggleTaskStatus = async (task) => {
-    try {
-      const newStatus = task.status === 'completed' ? 'pending' : 'completed';
-      await axios.put(`/api/tasks/${task._id}`, { status: newStatus });
-      fetchTasks();
-    } catch (error) {
-      console.error('Error updating task status:', error);
-      toast.error('Failed to update task status');
-    }
-  };
-
-  // Start editing
-  const startEdit = (task) => {
-    setEditingTask(task);
-    reset({
-      title: task.title,
-      description: task.description,
-      priority: task.priority,
-      status: task.status,
-      dueDate: task.dueDate ? format(new Date(task.dueDate), 'yyyy-MM-dd') : '',
-      tags: task.tags.join(', ')
-    });
-    setShowCreateModal(true);
-  };
-
+// Memoized Task Item Component to prevent unnecessary re-renders
+const TaskItem = React.memo(({ task, onToggle, onEdit, onDelete }) => {
   const getStatusBadge = (status) => {
     switch (status) {
       case 'completed':
@@ -143,6 +49,224 @@ const Tasks = () => {
         return <span className="badge-secondary">{priority}</span>;
     }
   };
+
+  return (
+    <div className="border border-gray-200 rounded-lg p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex-1">
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => onToggle(task)}
+              className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center ${
+                task.status === 'completed'
+                  ? 'bg-green-500 border-green-500 text-white'
+                  : 'border-gray-300 hover:border-green-500'
+              }`}
+            >
+              {task.status === 'completed' && <CheckCircle className="w-4 h-4" />}
+            </button>
+            <div className="flex-1">
+              <h3 className={`text-sm font-medium ${
+                task.status === 'completed' ? 'line-through text-gray-500' : 'text-gray-900'
+              }`}>
+                {task.title}
+              </h3>
+              {task.description && (
+                <p className="text-sm text-gray-600 mt-1">{task.description}</p>
+              )}
+              <div className="flex items-center space-x-2 mt-2">
+                {getStatusBadge(task.status)}
+                {getPriorityBadge(task.priority)}
+                {task.dueDate && (
+                  <span className="text-xs text-gray-500">
+                    Due: {format(new Date(task.dueDate), 'MMM dd, yyyy')}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => onEdit(task)}
+            className="p-2 text-gray-400 hover:text-blue-600"
+          >
+            <Edit2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => onDelete(task._id)}
+            className="p-2 text-gray-400 hover:text-red-600"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+TaskItem.displayName = 'TaskItem';
+
+const Tasks = () => {
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
+  const [filters, setFilters] = useState({
+    status: 'all',
+    priority: 'all',
+    search: ''
+  });
+  const [, setPagination] = useState({});
+  
+  // Use debounced search value
+  const debouncedSearch = useDebounce(filters.search, 500);
+  
+  // Cache for tasks to reduce re-fetching
+  const tasksCache = useRef(new Map());
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors }
+  } = useForm();
+
+  // Fetch tasks with caching
+  const fetchTasks = useCallback(async () => {
+    try {
+      setLoading(true);
+      const queryParams = new URLSearchParams();
+      
+      if (filters.status !== 'all') queryParams.append('status', filters.status);
+      if (filters.priority !== 'all') queryParams.append('priority', filters.priority);
+      if (debouncedSearch) queryParams.append('search', debouncedSearch);
+
+      const cacheKey = queryParams.toString();
+      
+      // Check cache first
+      if (tasksCache.current.has(cacheKey)) {
+        const cached = tasksCache.current.get(cacheKey);
+        const now = Date.now();
+        // Cache valid for 30 seconds
+        if (now - cached.timestamp < 30000) {
+          setTasks(cached.tasks);
+          setPagination(cached.pagination);
+          setLoading(false);
+          return;
+        }
+      }
+
+      const response = await api.get(`/api/tasks?${queryParams.toString()}`);
+      
+      // Update cache
+      tasksCache.current.set(cacheKey, {
+        tasks: response.data.tasks,
+        pagination: response.data.pagination,
+        timestamp: Date.now()
+      });
+      
+      setTasks(response.data.tasks);
+      setPagination(response.data.pagination);
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+      toast.error('Failed to fetch tasks');
+    } finally {
+      setLoading(false);
+    }
+  }, [filters.status, filters.priority, debouncedSearch]);
+
+  useEffect(() => {
+    fetchTasks();
+  }, [fetchTasks]);
+
+  // Create or update task
+  const onSubmit = async (data) => {
+    try {
+      console.log('📝 Form submitted with data:', data);
+      console.log('🔄 Editing task:', editingTask);
+      
+      if (editingTask) {
+        console.log('📤 Updating task with ID:', editingTask._id);
+        await api.put(`/api/tasks/${editingTask._id}`, data);
+        toast.success('Task updated successfully');
+      } else {
+        console.log('📤 Creating new task...');
+        const response = await api.post('/api/tasks', data);
+        console.log('✅ Task created:', response.data);
+        toast.success('Task created successfully');
+      }
+      
+      // Clear cache to ensure fresh data
+      tasksCache.current.clear();
+      fetchTasks();
+      setShowCreateModal(false);
+      setEditingTask(null);
+      reset();
+    } catch (error) {
+      console.error('❌ Error saving task:', error);
+      console.error('❌ Error response:', error.response?.data);
+      console.error('❌ Error status:', error.response?.status);
+      toast.error('Failed to save task');
+    }
+  };
+
+  // Delete task
+  const deleteTask = useCallback(async (taskId) => {
+    if (!window.confirm('Are you sure you want to delete this task?')) return;
+    
+    try {
+      await api.delete(`/api/tasks/${taskId}`);
+      toast.success('Task deleted successfully');
+      tasksCache.current.clear();
+      fetchTasks();
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      toast.error('Failed to delete task');
+    }
+  }, [fetchTasks]);
+
+  // Toggle task status with optimistic update
+  const toggleTaskStatus = useCallback(async (task) => {
+    try {
+      const newStatus = task.status === 'completed' ? 'pending' : 'completed';
+      
+      // Optimistic update
+      setTasks(prevTasks =>
+        prevTasks.map(t => t._id === task._id ? { ...t, status: newStatus } : t)
+      );
+      
+      await api.put(`/api/tasks/${task._id}`, { status: newStatus });
+      tasksCache.current.clear();
+    } catch (error) {
+      console.error('Error updating task status:', error);
+      toast.error('Failed to update task status');
+      // Revert on error
+      fetchTasks();
+    }
+  }, [fetchTasks]);
+
+  // Start editing
+  const startEdit = (task) => {
+    setEditingTask(task);
+    reset({
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
+      status: task.status,
+      dueDate: task.dueDate ? format(new Date(task.dueDate), 'yyyy-MM-dd') : '',
+      tags: task.tags.join(', ')
+    });
+    setShowCreateModal(true);
+  };
+
+  // Memoize filtered tasks count
+  const taskStats = useMemo(() => ({
+    total: tasks.length,
+    completed: tasks.filter(t => t.status === 'completed').length,
+    pending: tasks.filter(t => t.status === 'pending').length,
+    inProgress: tasks.filter(t => t.status === 'in-progress').length
+  }), [tasks]);
 
   return (
     <div className="space-y-6">
@@ -220,57 +344,13 @@ const Tasks = () => {
           ) : tasks.length > 0 ? (
             <div className="space-y-4">
               {tasks.map((task) => (
-                <div key={task._id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-3">
-                        <button
-                          onClick={() => toggleTaskStatus(task)}
-                          className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center ${
-                            task.status === 'completed'
-                              ? 'bg-green-500 border-green-500 text-white'
-                              : 'border-gray-300 hover:border-green-500'
-                          }`}
-                        >
-                          {task.status === 'completed' && <CheckCircle className="w-4 h-4" />}
-                        </button>
-                        <div className="flex-1">
-                          <h3 className={`text-sm font-medium ${
-                            task.status === 'completed' ? 'line-through text-gray-500' : 'text-gray-900'
-                          }`}>
-                            {task.title}
-                          </h3>
-                          {task.description && (
-                            <p className="text-sm text-gray-600 mt-1">{task.description}</p>
-                          )}
-                          <div className="flex items-center space-x-2 mt-2">
-                            {getStatusBadge(task.status)}
-                            {getPriorityBadge(task.priority)}
-                            {task.dueDate && (
-                              <span className="text-xs text-gray-500">
-                                Due: {format(new Date(task.dueDate), 'MMM dd, yyyy')}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={() => startEdit(task)}
-                        className="p-2 text-gray-400 hover:text-blue-600"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => deleteTask(task._id)}
-                        className="p-2 text-gray-400 hover:text-red-600"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <TaskItem
+                  key={task._id}
+                  task={task}
+                  onToggle={toggleTaskStatus}
+                  onEdit={startEdit}
+                  onDelete={deleteTask}
+                />
               ))}
             </div>
           ) : (

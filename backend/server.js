@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const compression = require('compression');
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
@@ -11,6 +12,9 @@ const userRoutes = require('./routes/user');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Compression middleware - compress all responses
+app.use(compression());
 
 // Security middleware
 app.use(helmet());
@@ -40,7 +44,7 @@ app.use(limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Connect to MongoDB
+// Connect to MongoDB with optimized settings
 const connectDB = async () => {
   try {
     const mongoUri = process.env.MONGODB_URI;
@@ -54,12 +58,20 @@ const connectDB = async () => {
     await mongoose.connect(mongoUri, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 10000, // Increase timeout to 10s
-      socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+      maxPoolSize: 10, // Maintain up to 10 socket connections
+      minPoolSize: 2,  // Maintain at least 2 socket connections
+      maxIdleTimeMS: 30000, // Close idle connections after 30s
+      compressors: ['zlib'], // Use compression for MongoDB communication
     });
-    console.log('MongoDB connected successfully');
+    
+    // Enable query result caching
+    mongoose.set('bufferCommands', false);
+    
+    console.log('✅ MongoDB connected successfully');
   } catch (err) {
-    console.error(' MongoDB connection error:', err.message);
+    console.error('❌ MongoDB connection error:', err.message);
     console.log('Server running without database. Some features may not work.');
   }
 };
